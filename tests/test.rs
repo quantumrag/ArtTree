@@ -1,14 +1,8 @@
 
-#![feature(iterator_step_by)]
-#![feature(test)]
-
-extern crate test;
-extern crate art;
-extern crate rand;
-
-
 use art::ArtTree;
+use rand::distributions::Alphanumeric;
 use rand::Rng;
+use std::hint::black_box;
 
 #[test]
 fn sanity_test() {
@@ -25,7 +19,7 @@ fn sanity_test() {
     }
 
     for i in 0..n {
-        test::black_box(t.insert(keys[i], keys[i]));
+        black_box(t.insert(keys[i], keys[i]));
     }
 
     for i in 0..n {
@@ -51,7 +45,7 @@ fn sanity_test_u32() {
     }
 
     for i in 0..n {
-        test::black_box(t.insert(keys[i], keys[i]));
+        black_box(t.insert(keys[i], keys[i]));
     }
 
     for i in 0..n {
@@ -69,7 +63,7 @@ fn sanity_seq_test() {
     let n = 5011 as u32;
 
     for i in 0..n {
-        test::black_box(t.insert(i, i));
+        black_box(t.insert(i, i));
     }
 
     for i in 0..n {
@@ -89,9 +83,13 @@ fn short_string_test() {
 
     let mut t = ArtTree::new();
     for i in 0..100 {
-        let s = rng.gen_ascii_chars().take(50).collect::<String>();
+        let s: String = (&mut rng)
+            .sample_iter(&Alphanumeric)
+            .take(50)
+            .map(char::from)
+            .collect();
         keys.push(s.clone());
-        test::black_box(t.insert(s, i));
+        black_box(t.insert(s, i));
     }
 
     for i in 0..100 {
@@ -110,9 +108,13 @@ fn long_string_test() {
 
     let mut t = ArtTree::new();
     for i in 0..100 {
-        let s = rng.gen_ascii_chars().take(500).collect::<String>();
+        let s: String = (&mut rng)
+            .sample_iter(&Alphanumeric)
+            .take(500)
+            .map(char::from)
+            .collect();
         keys.push(s.clone());
-        test::black_box(t.insert(s, i));
+        black_box(t.insert(s, i));
     }
 
     for i in 0..100 {
