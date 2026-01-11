@@ -2,8 +2,8 @@
 use std;
 use std::mem;
 
-use {ArtKey, ArtTree};
-use nodes::{ArtNode, ArtNode4, ArtNodeTrait, MAX_PREFIX_LEN};
+use crate::{ArtKey, ArtTree};
+use crate::nodes::{ArtNode, ArtNode4, ArtNodeTrait, MAX_PREFIX_LEN};
 
 // TODO: Decide what kind of comparison do we want, ie. PartialEq might not be necessarry.
 // If we decided to compare bytes of the key (which would be correct), we could also use SIMD.

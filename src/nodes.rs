@@ -1,54 +1,26 @@
 
 use std;
 use std::{mem, ptr};
-use std::marker::PhantomData;
 
-use {ArtKey};
+use crate::ArtKey;
 
 pub const MAX_PREFIX_LEN: usize = 6;
 pub const SMALL_STRUCT: usize = 8;
 const EMPTY_CELL: u8 = 0;
 
-macro_rules! make_array {
-    ($n:expr, $constructor:expr) => {{
-        let mut items: [_; $n] = std::mem::uninitialized();
-        for place in items.iter_mut() {
-            std::ptr::write(place, $constructor);
-        }
-        items
-    }}
-}
-
-type Small = [u8; SMALL_STRUCT];
-
-pub struct SmallStruct<T> {
-    storage: Small,
-    marker: PhantomData<T>,
-}
+pub struct SmallStruct<T>(T);
 
 impl<T> SmallStruct<T> {
     pub fn new(elem: T) -> Self {
-        unsafe {
-            let mut ret = SmallStruct { storage: mem::uninitialized(), marker: PhantomData };
-            std::ptr::copy_nonoverlapping(
-                &elem as *const T as *const u8,
-                ret.storage.as_mut_ptr(),
-                mem::size_of::<T>());
-            ret
-        }
+        SmallStruct(elem)
     }
 
     pub fn reference(&self) -> &T {
-        unsafe { &*(self.storage.as_ptr() as *const T) }
+        &self.0
     }
 
     pub fn own(self) -> T {
-        unsafe {
-            let mut ret = mem::uninitialized();
-            let dst = &mut ret as *mut T as *mut u8;
-            std::ptr::copy_nonoverlapping(self.storage.as_ptr(), dst, mem::size_of::<T>());
-            ret
-        }
+        self.0
     }
 }
 
@@ -109,7 +81,6 @@ pub trait ArtNodeTrait<K, V> {
     // 
     fn clean_child(&mut self, byte: u8) -> bool;
 
-    #[inline]
     fn is_full(&self) -> bool;
 
     fn grow_and_add(self, leaf: ArtNode<K, V>, byte: u8) -> ArtNode<K, V>;
@@ -118,22 +89,16 @@ pub trait ArtNodeTrait<K, V> {
     //
     fn shrink(self) -> ArtNode<K,V>;
 
-    #[inline]
     fn mut_base(&mut self) -> &mut ArtNodeBase;
 
-    #[inline]
     fn base(&self) -> &ArtNodeBase;
 
-    #[inline]
     fn find_child_mut(&mut self, byte: u8) -> &mut ArtNode<K, V>;
 
-    #[inline]
     fn find_child(&self, byte: u8) -> Option<&ArtNode<K, V>>;
 
-    #[inline]
     fn has_child(&self, byte: u8) -> bool;
 
-    #[inline]
     fn to_art_node(self: Box<Self>) -> ArtNode<K, V>;
 }
 
@@ -182,7 +147,7 @@ impl ArtNodeBase {
         ArtNodeBase {
             num_children: 0,
             partial_len: 0,
-            partial: unsafe { mem::uninitialized() }
+            partial: [0u8; MAX_PREFIX_LEN],
         }
     }
 
@@ -200,16 +165,17 @@ impl<K, V> ArtNode4<K, V> {
     pub fn new() -> Self {
         ArtNode4 {
             n: ArtNodeBase::new(),
-            keys: unsafe { mem::uninitialized() },
-            children: unsafe { mem::uninitialized() },
+            keys: mem::ManuallyDrop::new([EMPTY_CELL; 4]),
+            children: mem::ManuallyDrop::new(std::array::from_fn(|_| ArtNode::Empty)),
         }
     }
 }
 
 impl<K,V> Drop for ArtNode4<K,V> {
     fn drop(&mut self) {
-        for i in 0..self.n.num_children {
-            drop(&mut self.children[i as usize]);
+        unsafe {
+            mem::ManuallyDrop::drop(&mut self.children);
+            mem::ManuallyDrop::drop(&mut self.keys);
         }
     }
 }
@@ -218,16 +184,17 @@ impl<K, V> ArtNode16<K, V> {
     pub fn new() -> Self {
         ArtNode16 {
             n: ArtNodeBase::new(),
-            keys: unsafe { mem::uninitialized() },
-            children: unsafe { mem::uninitialized() }
+            keys: mem::ManuallyDrop::new([EMPTY_CELL; 16]),
+            children: mem::ManuallyDrop::new(std::array::from_fn(|_| ArtNode::Empty)),
         }
     }
 }
 
 impl<K,V> Drop for ArtNode16<K,V> {
     fn drop(&mut self) {
-        for i in 0..self.n.num_children {
-            drop(&mut self.children[i as usize]);
+        unsafe {
+            mem::ManuallyDrop::drop(&mut self.children);
+            mem::ManuallyDrop::drop(&mut self.keys);
         }
     }
 }
@@ -237,17 +204,15 @@ impl<K, V> ArtNode48<K, V> {
         ArtNode48 {
             n: ArtNodeBase::new(),
             keys: [EMPTY_CELL; 256],
-            children: unsafe { mem::uninitialized() }
+            children: mem::ManuallyDrop::new(std::array::from_fn(|_| ArtNode::Empty)),
         }
     }
 }
 
 impl<K,V> Drop for ArtNode48<K,V> {
     fn drop(&mut self) {
-        for i in 0..256 {
-            if self.keys[i] != EMPTY_CELL {
-                drop(&mut self.children[self.keys[i] as usize - 1]);
-            }
+        unsafe {
+            mem::ManuallyDrop::drop(&mut self.children);
         }
     }
 }
@@ -256,7 +221,7 @@ impl<K, V> ArtNode256<K, V> {
     pub fn new() -> Self {
         ArtNode256 {
             n: ArtNodeBase::new(),
-            children: unsafe { make_array!(256, ArtNode::Empty) }
+            children: std::array::from_fn(|_| ArtNode::Empty),
         }
     }
 }
@@ -264,10 +229,8 @@ impl<K, V> ArtNode256<K, V> {
 impl<K: ArtKey, V> ArtNodeTrait<K, V> for ArtNode4<K, V> {
     fn add_child(&mut self, child: ArtNode<K, V>, byte: u8) {
         let idx = self.n.num_children as usize;
-        unsafe {
-            ptr::write(&mut self.children[idx] as *mut ArtNode<K,V>, child);
-            ptr::write(&mut self.keys[idx] as *mut u8, byte);
-        }
+        self.children[idx] = child;
+        self.keys[idx] = byte;
         self.n.num_children += 1;
     }
 
@@ -358,10 +321,8 @@ impl<K: ArtKey, V> ArtNodeTrait<K, V> for ArtNode4<K, V> {
 impl<K: ArtKey, V> ArtNodeTrait<K, V> for ArtNode16<K, V> {
     fn add_child(&mut self, child: ArtNode<K, V>, byte: u8) {
         let idx = self.n.num_children as usize;
-        unsafe {
-            ptr::write(&mut self.children[idx] as *mut ArtNode<K,V>, child);
-            ptr::write(&mut self.keys[idx] as *mut u8, byte);
-        }
+        self.children[idx] = child;
+        self.keys[idx] = byte;
         self.n.num_children += 1;
     }
 
@@ -471,10 +432,8 @@ impl<K: ArtKey, V> ArtNodeTrait<K, V> for ArtNode16<K, V> {
 
 impl<K: ArtKey, V> ArtNodeTrait<K, V> for ArtNode48<K, V> {
     fn add_child(&mut self, child: ArtNode<K, V>, byte: u8) {
-        unsafe {
-            let idx = self.n.num_children as usize;
-            ptr::write(&mut self.children[idx] as *mut ArtNode<K,V>, child);
-        }
+        let idx = self.n.num_children as usize;
+        self.children[idx] = child;
         self.n.num_children += 1;
         self.keys[byte as usize] = self.n.num_children as u8;
     }
